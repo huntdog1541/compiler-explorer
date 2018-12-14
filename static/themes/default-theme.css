@@ -20,6 +20,10 @@ body {
     background-color: #eee;
 }
 
+.navbar-nav a.nav-link {
+    border: rgb(140,140,140) 1px solid;
+}
+
 .float-link {
     background-color: rgba(128, 128, 128, 0.5);
 }
@@ -28,18 +32,37 @@ body {
     background-color: rgba(128, 128, 160, 0.5);
 }
 
-.btn.active {
-    color: #fff;
-    border-color: #46b8da;
-    background-color: #5bc0de;
-}
-
 .lm_header {
     background-color: #f2f2f2;
 }
 
+pre.content {
+    background-color: #f5f5f5;
+}
+
+a.navbar-brand img.logo.inverse {
+    display: none !important;
+}
+
+a.navbar-brand img.logo.normal {
+    display: block !important;
+}
+
+.button-checkbox button:disabled {
+    background-color: #dae5e0 !important;
+    border-color: #aae3e0 !important;
+}
+
 .opcode {
     color: #066;
+}
+
+.top-bar.btn-toolbar.bg-light {
+    border-bottom: 1px solid #d2d3d4;
+}
+
+.bottom-bar.bg-light {
+    border-top: 1px solid #d2d3d4;
 }
 
 .opcode:nth-child(odd) {
@@ -124,4 +147,70 @@ body {
 
 .err-count {
     color: red;
+}
+
+.commit-entry:nth-child(odd) {
+    background-color: #ffffff;
+}
+
+.commit-entry:nth-child(even) {
+    background-color: #f2f2f2;
+}
+
+.popover, .popover-content, .libs-container, .lib-list {
+    background-color: #fefefe;
+}
+
+.lib-in-use {
+    background-color: green;
+}
+
+.consent-cookie-yes {
+    background-color: #c1e2b3;
+}
+
+.consent-cookie-no {
+    background-color: #f44336;
+    color: #ffffff;
+}
+
+#socialshare .share-twitter, .share-twitter {
+    background-color: #1da1f2;
+    color: white;
+}
+
+#socialshare .share-reddit, .share-reddit {
+    background-color: #ff4500;
+    color: white;
+}
+
+.share-disabled {
+    color: gray;
+}
+
+.community-advert {
+    background: #f0f0f0;
+    border-color: #67c52a;
+}
+
+.navbar-nav a.nav-link:hover {
+    background-color: #d8d9da;
+}
+
+kbd {
+    color: black;
+    border-color: #ccc;
+    background-color: #f7f7f7;
+}
+
+.prepend-options {
+    background-color: #e9ecef;
+}
+
+#simplecook {
+    background-color: #f4f4f4;
+}
+
+.new-cookie-msg {
+    color: black;
 }

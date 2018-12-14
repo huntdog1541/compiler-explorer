@@ -127,6 +127,7 @@ function setupSettings(root, settings, onChange, langId) {
             return (x / 1000.0).toFixed(2) + "s";
         }
     });
+    add(root.find('.enableCommunityAds'), 'enableCommunityAds', true, Checkbox);
     add(root.find('.hoverShowSource'), 'hoverShowSource', true, Checkbox);
     add(root.find('.hoverShowAsmDoc'), 'hoverShowAsmDoc', true, Checkbox);
     var themeSelect = root.find('.theme');
@@ -148,7 +149,9 @@ function setupSettings(root, settings, onChange, langId) {
         var isStoredUsable = false;
         colourSchemeSelect.empty();
         _.each(colour.schemes, function (scheme) {
-            if (!scheme.themes || scheme.themes.length === 0 || scheme.themes.indexOf(newTheme) !== -1 || scheme.themes.indexOf('all') !== -1) {
+            if (!scheme.themes || scheme.themes.length === 0 || scheme.themes.indexOf(newTheme) !== -1 ||
+                scheme.themes.indexOf('all') !== -1) {
+
                 colourSchemeSelect.append($('<option value="' + scheme.name + '">' + scheme.desc + "</option>"));
                 if (newThemeStoredScheme === scheme.name) {
                     isStoredUsable = true;
@@ -159,7 +162,8 @@ function setupSettings(root, settings, onChange, langId) {
             colourSchemeSelect.val(isStoredUsable ? newThemeStoredScheme : colourSchemeSelect.first().val());
         } else {
             // This should never happen. In case it does, lets use the default one
-            colourSchemeSelect.append($('<option value="' + colour.schemes[0].name + '">' + colour.schemes[0].desc + "</option>"));
+            colourSchemeSelect.append(
+                $('<option value="' + colour.schemes[0].name + '">' + colour.schemes[0].desc + "</option>"));
             colourSchemeSelect.val(colourSchemeSelect.first().val());
         }
         colourSchemeSelect.trigger('change');
@@ -183,6 +187,14 @@ function setupSettings(root, settings, onChange, langId) {
 
     add(root.find('.newEditorLastLang'), 'newEditorLastLang', true, Checkbox);
 
+    var formats = ["Google", "LLVM", "Mozilla", "Chromium", "WebKit"];
+    add(root.find('.formatBase'), 'formatBase', formats[0], Select,
+        _.map(formats, function (format) {
+            return {label: format, desc: format};
+        }));
+    //add(root.find('.formatOverrides'), 'formatOverrides', "", TextAreaInput);
+    add(root.find('.wordWrap'), 'wordWrap', false, Checkbox);
+
     function setSettings(settings) {
         onSettingsChange(settings);
         onChange(settings);
@@ -193,7 +205,7 @@ function setupSettings(root, settings, onChange, langId) {
             return {label: size, desc: size};
         })
     );
-
+    add(root.find('.enableCtrlS'), 'enableCtrlS', true, Checkbox);
 
     setSettings(settings);
     handleThemes();
