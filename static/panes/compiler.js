@@ -602,6 +602,8 @@ Compiler.prototype.onCompileResponse = function (request, result, cached) {
         });
         result.asm.splice(indexToDiscard + 1, result.asm.length - indexToDiscard);
     }
+    // Save which source produced this change. It should probably be saved earlier though
+    result.source = this.source;
     this.lastResult = result;
     var timeTaken = Math.max(0, Date.now() - this.pendingRequestSentAt);
     var wasRealReply = this.pendingRequestSentAt > 0;
@@ -657,6 +659,18 @@ Compiler.prototype.onCompileResponse = function (request, result, cached) {
 
     this.compileTimeLabel.text(timeLabelText);
 
+    if (result.popularArguments) {
+        this.handlePopularArgumentsResult(result.popularArguments);
+    } else {
+        this.compilerService.requestPopularArguments(this.compiler.id, request.options.userArguments).then(
+            _.bind(function (result) {
+                if (result && result.result) {
+                    this.handlePopularArgumentsResult(result.result);
+                }
+            }, this)
+        );
+    }
+
     this.eventHub.emit('compileResult', this.id, this.compiler, result, languages[this.currentLangId]);
     this.updateButtons();
     this.setCompilationOptionsPopover(result.compilationOptions ? result.compilationOptions.join(' ') : '');
@@ -681,7 +695,9 @@ Compiler.prototype.onEditorChange = function (editor, source, langId, compilerId
     if (editor === this.sourceEditorId && langId === this.currentLangId &&
         (compilerId === undefined || compilerId === this.id)) {
         this.source = source;
-        this.compile();
+        if (this.settings.compileOnChange) {
+            this.compile();
+        }
     }
 };
 
@@ -1001,6 +1017,50 @@ Compiler.prototype.updateButtons = function () {
         !(this.supportsTool("pahole") && !this.isToolActive(activeTools, "pahole")));
 };
 
+Compiler.prototype.handlePopularArgumentsResult = function (result) {
+    var popularArgumentsMenu = this.domRoot.find("div.populararguments div.dropdown-menu");
+    popularArgumentsMenu.html("");
+
+    if (result) {
+        var addedOption = false;
+
+        _.forEach(result, _.bind(function (arg, key) {
+            var argumentButton = $(document.createElement("button"));
+            argumentButton.addClass('dropdown-item btn btn-light btn-sm');
+            argumentButton.attr("title", arg.description);
+            argumentButton.data("arg", key);
+            argumentButton.html(
+                "<div class='argmenuitem'>" +
+                "<span class='argtitle'>" + _.escape(key) + "</span>" +
+                "<span class='argdescription'>" + arg.description + "</span>" +
+                "</div>");
+
+            argumentButton.click(_.bind(function () {
+                var button = argumentButton;
+                var curOptions = this.optionsField.val();
+                if (curOptions.length > 0) {
+                    this.optionsField.val(curOptions + " " + button.data("arg"));
+                } else {
+                    this.optionsField.val(button.data("arg"));
+                }
+
+                this.optionsField.change();
+            }, this));
+
+            popularArgumentsMenu.append(argumentButton);
+            addedOption = true;
+        }, this));
+
+        if (!addedOption) {
+            $("div.populararguments").hide();
+        } else {
+            $("div.populararguments").show();
+        }
+    } else {
+        $("div.populararguments").hide();
+    }
+};
+
 Compiler.prototype.onFontScale = function () {
     if (this.getEffectiveFilters().binary) {
         this.setBinaryMargin();
@@ -1025,6 +1085,7 @@ Compiler.prototype.initListeners = function () {
     this.eventHub.on('findCompilers', this.sendCompiler, this);
     this.eventHub.on('compilerSetDecorations', this.onCompilerSetDecorations, this);
     this.eventHub.on('settingsChange', this.onSettingsChange, this);
+    this.eventHub.on('requestCompilation', this.onRequestCompilation, this);
 
     this.eventHub.on('toolSettingsChange', this.onToolSettingsChange, this);
     this.eventHub.on('toolOpened', this.onToolOpened, this);
@@ -1283,6 +1344,12 @@ Compiler.prototype.setCompilerVersionPopover = function (version) {
             '" role="tooltip"><div class="arrow"></div>' +
             '<h3 class="popover-header"></h3><div class="popover-body"></div></div>'
     });
+};
+
+Compiler.prototype.onRequestCompilation = function (editorId) {
+    if (editorId === this.sourceEditorId) {
+        this.compile();
+    }
 };
 
 Compiler.prototype.onSettingsChange = function (newSettings) {
