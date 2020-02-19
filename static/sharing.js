@@ -39,7 +39,7 @@ var shareServices = {
             return "https://twitter.com/intent/tweet?text=" +
                 encodeURIComponent(title) + '&url=' + encodeURIComponent(url) + '&via=CompileExplore';
         },
-        text: ' Tweet'
+        text: 'Tweet'
     },
     reddit: {
         embedValid: false,
@@ -49,7 +49,7 @@ var shareServices = {
             return 'http://www.reddit.com/submit?url=' +
                 encodeURIComponent(url) + '&title=' + encodeURIComponent(title);
         },
-        text: ' Share on Reddit'
+        text: 'Share on Reddit'
     }
 };
 
@@ -90,6 +90,7 @@ function updateShares(container, url) {
         var newElement = baseTemplate.children('a.share-item').clone();
         if (service.logoClass) {
             newElement.prepend($('<span>')
+                .addClass('dropdown-icon')
                 .addClass(service.logoClass)
                 .prop('title', serviceName)
             );
@@ -123,7 +124,8 @@ function initShareButton(getLink, layout, noteNewState) {
         content: html,
         html: true,
         placement: 'bottom',
-        trigger: 'manual'
+        trigger: 'manual',
+        sanitize: false
     }).click(function () {
         getLink.popover('toggle');
     }).on('inserted.bs.popover', function () {
@@ -136,7 +138,7 @@ function initShareButton(getLink, layout, noteNewState) {
         var socialSharingElements = popoverElement.find('.socialsharing');
         var root = $('.urls-container:visible');
         var label = root.find('.current');
-        var permalink = $(".permalink:visible");
+        var permalink = $(".permalink");
         var urls = {};
         if (!currentNode) currentNode = $(root.find('.sources button')[0]);
         if (!currentBind) currentBind = currentNode.data().bind;
@@ -168,13 +170,27 @@ function initShareButton(getLink, layout, noteNewState) {
             setSocialSharing(socialSharing, result.url);
         }
 
+        function getEmbeddedCacheLinkId() {
+            if ($("#shareembedlink input:checked").length === 0) return "Embed";
+
+            return "Embed|" + $("#shareembedlink input:checked").map(function () {
+                return $(this).prop("class");
+            })
+                .get()
+                .join();
+        }
+
         function update() {
             var socialSharing = socialSharingElements;
             socialSharing.empty();
             if (!currentBind) return;
             permalink.prop('disabled', false);
             var config = layout.toConfig();
-            if (!urls[currentBind]) {
+            var cacheLinkId = currentBind;
+            if (currentBind === "Embed") {
+                cacheLinkId = getEmbeddedCacheLinkId();
+            }
+            if (!urls[cacheLinkId]) {
                 label.text(currentNode.text());
                 permalink.val('');
                 getLinks(config, currentBind, function (error, newUrl, extra, updateState) {
@@ -182,16 +198,16 @@ function initShareButton(getLink, layout, noteNewState) {
                         permalink.prop('disabled', true);
                         permalink.val(error || 'Error providing URL');
                     } else {
-                        urls[currentBind] = {
+                        urls[cacheLinkId] = {
                             updateState: updateState,
                             extra: extra,
                             url: newUrl
                         };
-                        onUpdate(socialSharing, config, currentBind, urls[currentBind]);
+                        onUpdate(socialSharing, config, currentBind, urls[cacheLinkId]);
                     }
                 });
             } else {
-                onUpdate(socialSharing, config, currentBind, urls[currentBind]);
+                onUpdate(socialSharing, config, currentBind, urls[cacheLinkId]);
             }
         }
 
@@ -199,6 +215,19 @@ function initShareButton(getLink, layout, noteNewState) {
             setCurrent($(this));
             update();
         });
+
+        var embeddedButton = $('.shareembed');
+        embeddedButton.on('click', function () {
+            setCurrent(embeddedButton);
+            update();
+            getLink.popover("hide");
+        });
+
+        $('#embedsettings input').off('click').on('click', function () {
+            setCurrent(embeddedButton);
+            update();
+        });
+
         update();
     }).prop('title', title);
 
@@ -217,24 +246,51 @@ function initShareButton(getLink, layout, noteNewState) {
             getLink.popover("hide");
     });
 
+    // Opens the popup if asked to by the editor
+    layout.eventHub.on('displaySharingPopover', function () {
+        getLink.popover("show");
+    });
+
     if (options.sharingEnabled) {
         updateShares($('#socialshare'), baseUrl);
     }
 }
 
-function getEmbeddedUrl(config, root, readOnly) {
+function getEmbeddedUrl(config, root, readOnly, extraOptions) {
     var location = window.location.origin + root;
-    var path = readOnly ? 'embed-ro#' : 'e#';
+    var path = "";
+    var parameters = "";
+
+    _.forEach(extraOptions, function (value, key) {
+        if (parameters === "") {
+            parameters = "?";
+        } else {
+            parameters += "&";
+        }
+
+        parameters += key + "=" + value;
+    });
+
+    if (readOnly) {
+        path = 'embed-ro' + parameters + '#';
+    } else {
+        path = 'e' + parameters + '#';
+    }
+
     return location + path + url.serialiseState(config);
 }
 
-function getEmbeddedHtml(config, root, isReadOnly) {
-    return '<iframe width="800px" height="200px" src="' + getEmbeddedUrl(config, root, isReadOnly) + '"></iframe>';
+function getEmbeddedHtml(config, root, isReadOnly, extraOptions) {
+    return '<iframe width="800px" height="200px" src="' +
+        getEmbeddedUrl(config, root, isReadOnly, extraOptions) + '"></iframe>';
 }
 
 function getShortLink(config, root, done) {
+    var useExternalShortener = options.urlShortenService !== 'default';
     var data = JSON.stringify({
-        config: config
+        config: useExternalShortener
+            ? url.serialiseState(config)
+            : config
     });
     $.ajax({
         type: 'POST',
@@ -243,8 +299,8 @@ function getShortLink(config, root, done) {
         contentType: 'application/json',  // Sent
         data: data,
         success: _.bind(function (result) {
-            var newPath = root + 'z/' + result.storedId;
-            done(null, window.location.origin + newPath, newPath, true);
+            var pushState = useExternalShortener ? null : result.url;
+            done(null, result.url, pushState, true);
         }, this),
         error: _.bind(function (err) {
             // Notify the user that we ran into trouble?
@@ -256,8 +312,6 @@ function getShortLink(config, root, done) {
 
 function getLinks(config, currentBind, done) {
     var root = window.httpRoot;
-    if (!root.endsWith("/")) root += "/";
-    var readOnly = true;
     switch (currentBind) {
         case 'Short':
             getShortLink(config, root, done);
@@ -265,13 +319,15 @@ function getLinks(config, currentBind, done) {
         case 'Full':
             done(null, window.location.origin + root + '#' + url.serialiseState(config), false);
             return;
-        case 'Embed':
-            readOnly = false;
-        // fallthrough
-        case 'Embed (RO)':
-            done(null, getEmbeddedHtml(config, root, readOnly), false);
-            return;
         default:
+            if (currentBind.substr(0, 5) === "Embed") {
+                var options = {};
+                $("#shareembedlink input:checked").each(function () {
+                    options[$(this).prop("class")] = true;
+                });
+                done(null, getEmbeddedHtml(config, root, false, options), false);
+                return;
+            }
             // Hmmm
             done('Unknown link type', null);
     }

@@ -177,6 +177,34 @@ describe('Pascal compiler output', () => {
     });
 });
 
+describe('Tool output', () => {
+    it('removes the relative path', () => {
+        utils.parseOutput('./example.cpp:1:1: Fatal: There were 1 errors compiling module, stopping', './example.cpp').should.deep.equals([
+            {
+                tag: {
+                    column: 1,
+                    line: 1,
+                    text: 'Fatal: There were 1 errors compiling module, stopping'
+                },
+                text: '<source>:1:1: Fatal: There were 1 errors compiling module, stopping'
+            }
+        ]);
+    });
+
+    it('removes the jailed path', () => {
+        utils.parseOutput('/home/ubuntu/example.cpp:1:1: Fatal: There were 1 errors compiling module, stopping', './example.cpp').should.deep.equals([
+            {
+                tag: {
+                    column: 1,
+                    line: 1,
+                    text: 'Fatal: There were 1 errors compiling module, stopping'
+                },
+                text: '<source>:1:1: Fatal: There were 1 errors compiling module, stopping'
+            }
+        ]);
+    });
+});
+
 describe('Pads right', () => {
     it('works', () => {
         utils.padRight('abcd', 8).should.equal('abcd    ');
@@ -235,10 +263,12 @@ describe('Hash interface', () => {
         utils.getHash('sugar', version).should.equal('afa3c89d0f6a61de6805314c9bd7c52d020425a3a3c7bbdfa7c0daec594e5ef1');
     });
     it('correctly hashes objects', () => {
-        utils.getHash({toppings: [
-            {name: 'raspberries', optional: false},
-            {name: 'ground cinnamon', optional: true}
-        ]}).should.equal('e205d63abd5db363086621fdc62c4c23a51b733bac5855985a8b56642d570491');
+        utils.getHash({
+            toppings: [
+                {name: 'raspberries', optional: false},
+                {name: 'ground cinnamon', optional: true}
+            ]
+        }).should.equal('e205d63abd5db363086621fdc62c4c23a51b733bac5855985a8b56642d570491');
     });
 });
 
@@ -261,7 +291,62 @@ describe('GoldenLayout utils', () => {
                         {compiler: 'gsnapshot'},
                         {compiler: 'rv32clang'}
                     ]
-                })
+                });
             });
-    })
+    });
+});
+
+describe('squashes horizontal whitespace', () => {
+    it('handles empty input', () => {
+        utils.squashHorizontalWhitespace('').should.equals('');
+        utils.squashHorizontalWhitespace(' ').should.equals('');
+        utils.squashHorizontalWhitespace('    ').should.equals('');
+    });
+    it('handles leading spaces', () => {
+        utils.squashHorizontalWhitespace(' abc').should.equals(' abc');
+        utils.squashHorizontalWhitespace('   abc').should.equals('  abc');
+        utils.squashHorizontalWhitespace('       abc').should.equals('  abc');
+    });
+    it('handles interline spaces', () => {
+        utils.squashHorizontalWhitespace('abc abc').should.equals('abc abc');
+        utils.squashHorizontalWhitespace('abc   abc').should.equals('abc abc');
+        utils.squashHorizontalWhitespace('abc     abc').should.equals('abc abc');
+    });
+    it('handles leading and interline spaces', () => {
+        utils.squashHorizontalWhitespace(' abc  abc').should.equals(' abc abc');
+        utils.squashHorizontalWhitespace('  abc abc').should.equals('  abc abc');
+        utils.squashHorizontalWhitespace('  abc     abc').should.equals('  abc abc');
+        utils.squashHorizontalWhitespace('    abc   abc').should.equals('  abc abc');
+    });
+});
+
+describe('replaces all substrings', () => {
+    it('works with no substitutions', () => {
+        const string = "This is a line with no replacements";
+        utils.replaceAll(string, "not present", "won't be substituted").should.equal(string);
+    });
+    it('handles odd cases', () => {
+        utils.replaceAll("", "", "").should.equal("");
+        utils.replaceAll("Hello", "", "").should.equal("Hello");
+    });
+    it('works with single replacement', () => {
+        utils.replaceAll("This is a line with a mistook in it", "mistook", "mistake")
+            .should.equal("This is a line with a mistake in it");
+        utils.replaceAll("This is a line with a mistook", "mistook", "mistake")
+            .should.equal("This is a line with a mistake");
+        utils.replaceAll("Mistooks were made", "Mistooks", "Mistakes")
+            .should.equal("Mistakes were made");
+    });
+
+    it('works with multiple replacements', () => {
+        utils.replaceAll("A mistook is a mistook", "mistook", "mistake")
+            .should.equal("A mistake is a mistake");
+        utils.replaceAll("aaaaaaaaaaaaaaaaaaaaaaaaaaa", "a", "b")
+            .should.equal("bbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    });
+
+    it('works with overlapping replacements', () => {
+        utils.replaceAll("aaaaaaaa", "a", "ba")
+            .should.equal("babababababababa");
+    });
 });

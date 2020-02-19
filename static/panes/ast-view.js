@@ -24,7 +24,7 @@
 "use strict";
 
 var FontScale = require('../fontscale');
-var monaco = require('../monaco');
+var monaco = require('monaco-editor');
 var _ = require('underscore');
 var $ = require('jquery');
 var ga = require('../analytics');
@@ -34,7 +34,6 @@ function Ast(hub, container, state) {
     this.eventHub = hub.createEventHub();
     this.domRoot = container.getElement();
     this.domRoot.html($('#ast').html());
-    this._currentDecorations = [];
     this.astEditor = monaco.editor.create(this.domRoot.find(".monaco-placeholder")[0], {
         value: "",
         scrollBeyondLastLine: false,
@@ -53,6 +52,9 @@ function Ast(hub, container, state) {
     this._compilerid = state.id;
     this._compilerName = state.compilerName;
     this._editorid = state.editorid;
+
+    this.awaitingInitialResults = false;
+    this.selection = state.selection;
 
     this.initButtons(state);
     this.initCallbacks();
@@ -89,6 +91,12 @@ Ast.prototype.initCallbacks = function () {
 
     this.container.on('resize', this.resize, this);
     this.container.on('shown', this.resize, this);
+
+    this.cursorSelectionThrottledFunction =
+        _.throttle(_.bind(this.onDidChangeCursorSelection, this), 500);
+    this.astEditor.onDidChangeCursorSelection(_.bind(function (e) {
+        this.cursorSelectionThrottledFunction(e);
+    }, this));
 };
 
 // TODO: de-dupe with compiler etc
@@ -132,6 +140,15 @@ Ast.prototype.getDisplayableAst = function (astResult) {
 
 Ast.prototype.showAstResults = function (results) {
     this.astEditor.setValue(results);
+
+    if (!this.awaitingInitialResults) {
+        if (this.selection) {
+            this.astEditor.setSelection(this.selection);
+            this.astEditor.revealLinesInCenter(this.selection.startLineNumber,
+                this.selection.endLineNumber);
+        }
+        this.awaitingInitialResults = true;
+    }
 };
 
 Ast.prototype.onCompiler = function (id, compiler, options, editorid) {
@@ -162,7 +179,8 @@ Ast.prototype.updateState = function () {
 Ast.prototype.currentState = function () {
     var state = {
         id: this._compilerid,
-        editorid: this._editorid
+        editorid: this._editorid,
+        selection: this.selection
     };
     this.fontScale.addState(state);
     return state;
@@ -185,8 +203,16 @@ Ast.prototype.onSettingsChange = function (newSettings) {
         minimap: {
             enabled: newSettings.showMinimap
         },
-        fontFamily: newSettings.editorsFFont
+        fontFamily: newSettings.editorsFFont,
+        fontLigatures: newSettings.editorsFLigatures
     });
+};
+
+Ast.prototype.onDidChangeCursorSelection = function (e) {
+    if (this.awaitingInitialResults) {
+        this.selection = e.selection;
+        this.updateState();
+    }
 };
 
 Ast.prototype.close = function () {

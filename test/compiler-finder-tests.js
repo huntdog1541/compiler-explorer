@@ -40,9 +40,13 @@ const props = {
     compilers: "goodCompiler:&badCompiler"
 };
 
-const compilerProps = new properties.CompilerProps(languages, properties.fakeProps(props));
-
 describe('Compiler-finder', function () {
+    let compilerProps;
+
+    before(() => {
+        compilerProps = new properties.CompilerProps(languages, properties.fakeProps(props));
+    });
+
     it('should not hang for undefined groups (Bug #860)', () => {
         const optionsHandler = {
             get: () => {
@@ -53,6 +57,6 @@ describe('Compiler-finder', function () {
             }
         };
         const finder = new CompilerFinder({}, compilerProps, properties.fakeProps({}), {}, optionsHandler);
-        return Promise.all(finder.getCompilers()).should.eventually.have.lengthOf(2);
+        return finder.getCompilers().should.eventually.have.lengthOf(2);
     })
 });

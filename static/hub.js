@@ -28,12 +28,14 @@ var _ = require('underscore');
 var Sentry = require('@sentry/browser');
 var editor = require('./panes/editor');
 var compiler = require('./panes/compiler');
+var executor = require('./panes/executor');
 var output = require('./panes/output');
 var tool = require('./panes/tool');
 var Components = require('components');
 var diff = require('./panes/diff');
 var optView = require('./panes/opt-view');
 var astView = require('./panes/ast-view');
+var irView = require('./panes/ir-view');
 var gccDumpView = require('./panes/gccdump-view');
 var cfgView = require('./panes/cfg-view');
 var conformanceView = require('./panes/conformance-view');
@@ -61,15 +63,17 @@ Ids.prototype.next = function () {
     throw 'Ran out of ids!?';
 };
 
-function Hub(layout, subLangId) {
+function Hub(layout, subLangId, defaultLangId) {
     this.layout = layout;
     this.editorIds = new Ids();
     this.compilerIds = new Ids();
-    this.compilerService = new CompilerService();
+    this.executorIds = new Ids();
+    this.compilerService = new CompilerService(layout.eventHub);
     this.deferred = true;
     this.deferredEmissions = [];
     this.lastOpenedLangId = null;
     this.subdomainLangId = subLangId || undefined;
+    this.defaultLangId = defaultLangId;
 
     // FIXME
     // We can't avoid this self as _ is undefined at this point
@@ -82,6 +86,10 @@ function Hub(layout, subLangId) {
     layout.registerComponent(Components.getCompiler().componentName,
         function (container, state) {
             return self.compilerFactory(container, state);
+        });
+    layout.registerComponent(Components.getExecutor().componentName,
+        function (container, state) {
+            return self.executorFactory(container, state);
         });
     layout.registerComponent(Components.getOutput().componentName,
         function (container, state) {
@@ -102,6 +110,10 @@ function Hub(layout, subLangId) {
     layout.registerComponent(Components.getAstView().componentName,
         function (container, state) {
             return self.astViewFactory(container, state);
+        });
+    layout.registerComponent(Components.getIrView().componentName,
+        function (container, state) {
+            return self.irViewFactory(container, state);
         });
     layout.registerComponent(Components.getGccDumpView().componentName,
         function (container, state) {
@@ -128,6 +140,12 @@ function Hub(layout, subLangId) {
     layout.eventHub.on('compilerClose', function (id) {
         this.compilerIds.remove(id);
     }, this);
+    layout.eventHub.on('executorOpen', function (id) {
+        this.executorIds.add(id);
+    }, this);
+    layout.eventHub.on('executorClose', function (id) {
+        this.executorIds.remove(id);
+    }, this);
     layout.eventHub.on('languageChange', function (editorId, langId) {
         this.lastOpenedLangId = langId;
     }, this);
@@ -153,6 +171,10 @@ Hub.prototype.nextCompilerId = function () {
     return this.compilerIds.next();
 };
 
+Hub.prototype.nextExecutorId = function () {
+    return this.executorIds.next();
+};
+
 Hub.prototype.codeEditorFactory = function (container, state) {
     // Ensure editors are closable: some older versions had 'isClosable' false.
     // NB there doesn't seem to be a better way to do this than reach into the config and rely on the fact nothing
@@ -163,6 +185,10 @@ Hub.prototype.codeEditorFactory = function (container, state) {
 
 Hub.prototype.compilerFactory = function (container, state) {
     return new compiler.Compiler(this, container, state);
+};
+
+Hub.prototype.executorFactory = function (container, state) {
+    return new executor.Executor(this, container, state);
 };
 
 Hub.prototype.outputFactory = function (container, state) {
@@ -184,6 +210,11 @@ Hub.prototype.optViewFactory = function (container, state) {
 Hub.prototype.astViewFactory = function (container, state) {
     return new astView.Ast(this, container, state);
 };
+
+Hub.prototype.irViewFactory = function (container, state) {
+    return new irView.Ir(this, container, state);
+};
+
 Hub.prototype.gccDumpViewFactory = function (container, state) {
     return new gccDumpView.GccDump(this, container, state);
 };

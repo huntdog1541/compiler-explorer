@@ -6,12 +6,22 @@
     margin-left: 0;
 }
 
+/* workaround high DPI issues in monaco. SEE: https://github.com/mattgodbolt/compiler-explorer/issues/1488 */
+.monaco-editor .margin-view-overlays .line-numbers {
+    cursor: default !important;
+}
+
 /*
  * https://github.com/Microsoft/monaco-editor/issues/417
  * Safari 10.1, fails inherit correct visibility from parent when we change the visibility of parent element from hidden to inherit, in this particular case.
  */
 .monaco-editor-hover .monaco-scrollable-element {
     visibility: visible;
+}
+
+.monaco-editor .asm-label-link {
+    text-decoration: underline;
+    cursor: pointer;
 }
 
 body {
@@ -26,21 +36,7 @@ body {
     padding: 0;
 }
 
-.navbar-brand img.beta-overlay {
-    display: none;
-}
-
-.beta .navbar-brand img.beta-overlay {
-    position: absolute;
-    top: 0;
-    display: block;
-}
-
-.navbar-brand img.dev-overlay {
-    display: none;
-}
-
-.dev .navbar-brand img.dev-overlay {
+.navbar-brand img.logo-overlay {
     position: absolute;
     top: 0;
     display: block;
@@ -70,7 +66,7 @@ body {
 
 .popover.libs-popover {
     max-width: 800px !important;
-    max-height: 400px !important;
+    max-height: 600px !important;
 }
 
 .template {
@@ -104,6 +100,11 @@ li.tweet {
     min-width: 14em;
 }
 
+.difftype-picker {
+    max-width: 10em;
+    min-width: 10em;
+}
+
 .diff-picker .compiler {
     font-weight: bold;
 }
@@ -132,29 +133,6 @@ li.tweet {
     margin: 0;
     padding: 0;
     overflow: hidden;
-}
-
-.address {
-    display: inline;
-}
-
-.opcodes {
-    display: inline;
-}
-
-.opcode {
-    margin-right: 0.2em;
-}
-
-.binary-side {
-    text-align: left;
-    float: left;
-    clear: none;
-    width: 100%;
-}
-
-.highlighted {
-    font-weight: bold;
 }
 
 .lm_splitter.lm_vertical .lm_drag_handle {
@@ -239,7 +217,7 @@ pre.content.wrap {
     left: 3px;
 }
 
-.linked-code-decoration-inline {
+.linked-code-decoration-column {
     font-weight: 600;
 }
 
@@ -250,13 +228,13 @@ pre.content.wrap {
 
 @media (min-width: 1200px) {
     .modal-dialog {
-        width: 1000px;
+        max-width: 1000px;
     }
 }
 
 @media (min-width: 1400px) {
     .modal-dialog {
-        width: 1200px;
+        max-width: 1200px;
     }
 }
 
@@ -325,6 +303,8 @@ pre.content.wrap {
 
 .font-size-list {
     min-width: 43px !important;
+    max-height: 40% !important;
+    overflow-y: scroll;
     width: auto;
 }
 
@@ -384,6 +364,14 @@ pre.content.wrap {
 
 button.dropdown-item.btn.btn-light.btn-sm {
     margin-left: 0 !important;
+}
+
+label#vim-label {
+    top: 3px;
+}
+
+input.vim-check {
+    margin-bottom: 4px
 }
 
 .opens-new-window {
@@ -485,4 +473,65 @@ kbd {
 .new-cookie-msg {
     display: inline;
     margin: 0 2px 0 2px;
+}
+
+.dropdown-icon {
+    width: 25px;
+    text-align: center;
+    margin-right: 6px;
+}
+
+#socialshare {
+    margin-left: -3px;
+}
+
+.linked-compiler-output-line {
+    cursor: pointer;
+}
+
+.lm_content {
+    overflow: visible;
+}
+
+.lm_header {
+    /* Needed to prevent the tab selection dropdown getting stuck behind other elements */
+    z-index: 3 !important;
+    height: 20px !important;
+}
+
+@media (max-width: 768px) {
+    .lm_header {
+        height: 50px !important;
+    }
+
+    .lm_header .lm_tabs {
+        height: 100%;
+    }
+
+    .lm_header .lm_tabs .lm_tab {
+        height: 31px;
+        padding-top: 15px;
+    }
+
+    .lm_controls li {
+        padding-top: 20px;
+        transform: scale(1.8);
+        padding-right: 15px;
+    }
+
+    .lm_controls .lm_tabdropdown {
+        padding-top: 8px;
+    }
+
+    .lm_header .lm_tabdropdown_list .lm_tab {
+        height: 50px;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+    }
+}
+
+.open-in-cppinsights *,
+.open-in-quickbench * {
+    vertical-align: middle;
 }

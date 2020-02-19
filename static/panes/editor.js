@@ -28,31 +28,29 @@ var colour = require('../colour');
 var loadSaveLib = require('../loadSave');
 var FontScale = require('../fontscale');
 var Components = require('../components');
-var monaco = require('../monaco');
+var monaco = require('monaco-editor');
 var options = require('../options');
 var Alert = require('../alert');
 var local = require('../local');
 var ga = require('../analytics');
+var monacoVim = require('monaco-vim');
 require('../modes/cppp-mode');
 require('../modes/d-mode');
-require('../modes/rust-mode');
 require('../modes/ispc-mode');
 require('../modes/llvm-ir-mode');
 require('../modes/haskell-mode');
 require('../modes/ocaml-mode');
 require('../modes/clean-mode');
-require('../modes/pascal-mode');
 require('../modes/cuda-mode');
 require('../modes/fortran-mode');
 require('../modes/zig-mode');
 require('../modes/nc-mode');
 require('../modes/ada-mode');
+require('../modes/nim-mode');
 require('selectize');
 
 var loadSave = new loadSaveLib.LoadSave();
-
 var languages = options.languages;
-
 
 function Editor(hub, state, container) {
     this.id = state.id || hub.nextEditorId();
@@ -64,10 +62,8 @@ function Editor(hub, state, container) {
     // Should probably be its own function somewhere
     this.settings = JSON.parse(local.get('settings', '{}'));
     this.ourCompilers = {};
+    this.ourExecutors = {};
     this.httpRoot = window.httpRoot;
-    if (!this.httpRoot.endsWith('/')) {
-        this.httpRoot += '/';
-    }
     this.widgetsByCompiler = {};
     this.asmByCompiler = {};
     this.busyCompilers = {};
@@ -75,12 +71,16 @@ function Editor(hub, state, container) {
 
     this.decorations = {};
     this.prevDecorations = [];
+    this.extraDecorations = [];
 
     this.fadeTimeoutId = -1;
 
     this.editorSourceByLang = {};
     this.alertSystem = new Alert();
     this.alertSystem.prefixMessage = "Editor #" + this.id + ": ";
+
+    this.awaitingInitialResults = false;
+    this.selection = state.selection;
 
     this.langKeys = _.keys(languages);
     this.initLanguage(state);
@@ -99,9 +99,11 @@ function Editor(hub, state, container) {
             maxColumn: 80
         },
         folding: true,
-        lineNumbersMinChars: options.embedded ? 1 : 3,
+        lineNumbersMinChars: 1,
         emptySelectionClipboard: true,
-        autoIndent: true
+        autoIndent: true,
+        vimInUse: this.settings.useVim,
+        fontLigatures: this.settings.editorsFLigatures
     });
     this.editor.getModel().setEOL(monaco.editor.EndOfLineSequence.LF);
 
@@ -126,6 +128,10 @@ function Editor(hub, state, container) {
     this.initEditorActions();
     this.initButtons(state);
     this.initCallbacks();
+
+    if (this.settings.useVim) {
+        this.enableVim();
+    }
 
     var usableLanguages = _.filter(languages, function (language) {
         return hub.compilerService.compilersByLang[language.id];
@@ -171,10 +177,35 @@ function Editor(hub, state, container) {
     });
 }
 
+Editor.prototype.onMotd = function (motd) {
+    this.extraDecorations = motd.decorations;
+    this.updateExtraDecorations();
+};
+
+Editor.prototype.updateExtraDecorations = function () {
+    var decorationsDirty = false;
+    _.each(this.extraDecorations, _.bind(function (decoration) {
+        if (decoration.filter && decoration.filter.indexOf(this.currentLanguage.name.toLowerCase()) < 0) return;
+        var match = this.editor.getModel().findNextMatch(decoration.regex, {
+            column: 1,
+            lineNumber: 1
+        }, true, true, null, false);
+        if (match !== this.decorations[decoration.name]) {
+            decorationsDirty = true;
+            this.decorations[decoration.name] = match ? [{range: match.range, options: decoration.decoration}] : null;
+        }
+    }, this));
+    if (decorationsDirty)
+        this.updateDecorations();
+};
+
 // If compilerId is undefined, every compiler will be pinged
 Editor.prototype.maybeEmitChange = function (force, compilerId) {
     var source = this.getSource();
     if (!force && source === this.lastChangeEmitted) return;
+
+    this.updateExtraDecorations();
+
     this.lastChangeEmitted = source;
     this.eventHub.emit('editorChange', this.id, this.lastChangeEmitted, this.currentLanguage.id, compilerId);
 };
@@ -183,7 +214,8 @@ Editor.prototype.updateState = function () {
     var state = {
         id: this.id,
         source: this.getSource(),
-        lang: this.currentLanguage.id
+        lang: this.currentLanguage.id,
+        selection: this.selection
     };
     this.fontScale.addState(state);
     this.container.setState(state);
@@ -235,45 +267,102 @@ Editor.prototype.initCallbacks = function () {
     }, this);
 
     this.eventHub.on('compilerOpen', this.onCompilerOpen, this);
+    this.eventHub.on('executorOpen', this.onExecutorOpen, this);
     this.eventHub.on('compilerClose', this.onCompilerClose, this);
     this.eventHub.on('compiling', this.onCompiling, this);
     this.eventHub.on('compileResult', this.onCompileResponse, this);
     this.eventHub.on('selectLine', this.onSelectLine, this);
     this.eventHub.on('editorSetDecoration', this.onEditorSetDecoration, this);
+    this.eventHub.on('editorLinkLine', this.onEditorLinkLine, this);
     this.eventHub.on('settingsChange', this.onSettingsChange, this);
     this.eventHub.on('conformanceViewOpen', this.onConformanceViewOpen, this);
     this.eventHub.on('conformanceViewClose', this.onConformanceViewClose, this);
     this.eventHub.on('resize', this.resize, this);
     this.eventHub.on('newSource', this.onNewSource, this);
+    this.eventHub.on('motd', this.onMotd, this);
+    this.eventHub.emit('requestMotd');
 
     this.editor.getModel().onDidChangeContent(_.bind(function () {
         this.debouncedEmitChange();
         this.updateState();
     }, this));
 
-    this.editor.onMouseLeave(_.bind(function () {
-        this.fadeTimeoutId = setTimeout(_.bind(function () {
-            this.clearCompilerLinkedLines();
-            this.fadeTimeoutId = -1;
-        }, this), 5000);
-    }, this));
-
-    this.mouseMoveThrottledFunction = _.throttle(_.bind(function (e) {
-        if (e !== null && e.target !== null && this.settings.hoverShowSource && e.target.position !== null) {
-            this.tryCompilerLinkLine(e.target.position.lineNumber, false);
-        }
-    }, this), 250);
+    this.mouseMoveThrottledFunction = _.throttle(_.bind(this.onMouseMove, this), 50);
 
     this.editor.onMouseMove(_.bind(function (e) {
         this.mouseMoveThrottledFunction(e);
-        // This can't be throttled or we can clear a timeout where we're already outside
-        if (this.fadeTimeoutId !== -1) {
-            clearTimeout(this.fadeTimeoutId);
-            this.fadeTimeoutId = -1;
-        }
+    }, this));
+
+    this.cursorSelectionThrottledFunction =
+        _.throttle(_.bind(this.onDidChangeCursorSelection, this), 500);
+    this.editor.onDidChangeCursorSelection(_.bind(function (e) {
+        this.cursorSelectionThrottledFunction(e);
     }, this));
 
     this.eventHub.on('initialised', this.maybeEmitChange, this);
+
+    $(document).on('keyup.editable', _.bind(function (e) {
+        if (e.target === this.domRoot.find(".monaco-placeholder .inputarea")[0]) {
+            if (e.which === 27) {
+                this.onEscapeKey(e);
+            } else if (e.which === 45) {
+                this.onInsertKey(e);
+            }
+        }
+    }, this));
+};
+
+Editor.prototype.onMouseMove = function (e) {
+    if (e !== null && e.target !== null && this.settings.hoverShowSource && e.target.position !== null) {
+        this.tryPanesLinkLine(e.target.position.lineNumber, false);
+    }
+};
+
+Editor.prototype.onDidChangeCursorSelection = function (e) {
+    if (this.awaitingInitialResults) {
+        this.selection = e.selection;
+        this.updateState();
+    }
+};
+
+Editor.prototype.onEscapeKey = function () {
+    if (this.editor.vimInUse) {
+        var currentState = monacoVim.VimMode.Vim.maybeInitVimState_(this.vimMode);
+        if (currentState.insertMode) {
+            monacoVim.VimMode.Vim.exitInsertMode(this.vimMode);
+        } else if (currentState.visualMode) {
+            monacoVim.VimMode.Vim.exitVisualMode(this.vimMode, false);
+        }
+    }
+};
+
+Editor.prototype.onInsertKey = function (event) {
+    if (this.editor.vimInUse) {
+        var currentState = monacoVim.VimMode.Vim.maybeInitVimState_(this.vimMode);
+        if (!currentState.insertMode) {
+            var insertEvent = {};
+            insertEvent.preventDefault = event.preventDefault;
+            insertEvent.stopPropagation = event.stopPropagation;
+            insertEvent.browserEvent = {};
+            insertEvent.browserEvent.key = 'i';
+            insertEvent.browserEvent.defaultPrevented = false;
+            insertEvent.keyCode = 39;
+            this.vimMode.handleKeyDown(insertEvent);
+        }
+    }
+};
+
+Editor.prototype.enableVim = function () {
+    this.vimMode = monacoVim.initVimMode(this.editor, this.domRoot.find('#v-status')[0]);
+    this.vimFlag.prop("class", "btn btn-info");
+    this.editor.vimInUse = true;
+};
+
+Editor.prototype.disableVim = function () {
+    this.vimMode.dispose();
+    this.domRoot.find('#v-status').html("");
+    this.vimFlag.prop("class", "btn btn-light");
+    this.editor.vimInUse = false;
 };
 
 Editor.prototype.initButtons = function (state) {
@@ -290,12 +379,21 @@ Editor.prototype.initButtons = function (state) {
     this.loadSaveButton = this.domRoot.find('.load-save');
     var paneAdderDropdown = this.domRoot.find('.add-pane');
     var addCompilerButton = this.domRoot.find('.btn.add-compiler');
+    var addExecutorButton = this.domRoot.find('.btn.add-executor');
     this.conformanceViewerButton = this.domRoot.find('.btn.conformance');
     var addEditorButton = this.domRoot.find('.btn.add-editor');
-
+    var toggleVimButton = this.domRoot.find('#vim-flag');
     var togglePaneAdder = function () {
         paneAdderDropdown.dropdown('toggle');
     };
+    this.vimFlag = this.domRoot.find('#vim-flag');
+    toggleVimButton.on('click', _.bind(function () {
+        if (this.editor.vimInUse) {
+            this.disableVim();
+        } else {
+            this.enableVim();
+        }
+    }, this));
 
     // NB a new compilerConfig needs to be created every time; else the state is shared
     // between all compilers created this way. That leads to some nasty-to-find state
@@ -304,8 +402,12 @@ Editor.prototype.initButtons = function (state) {
         return Components.getCompiler(this.id, this.currentLanguage.id);
     }, this);
 
+    var getExecutorConfig = _.bind(function () {
+        return Components.getExecutor(this.id, this.currentLanguage.id);
+    }, this);
+
     var getConformanceConfig = _.bind(function () {
-        return Components.getConformanceView(this.id, this.getSource());
+        return Components.getConformanceView(this.id, this.getSource(), this.currentLanguage.id);
     }, this);
 
     var getEditorConfig = _.bind(function () {
@@ -319,6 +421,7 @@ Editor.prototype.initButtons = function (state) {
     }, this);
 
     addDragListener(addCompilerButton, getCompilerConfig);
+    addDragListener(addExecutorButton, getExecutorConfig);
     addDragListener(this.conformanceViewerButton, getConformanceConfig);
     addDragListener(addEditorButton, getEditorConfig);
 
@@ -331,6 +434,7 @@ Editor.prototype.initButtons = function (state) {
     }, this);
 
     bindClickEvent(addCompilerButton, getCompilerConfig);
+    bindClickEvent(addExecutorButton, getExecutorConfig);
     bindClickEvent(this.conformanceViewerButton, getConformanceConfig);
     bindClickEvent(addEditorButton, getEditorConfig);
 
@@ -343,6 +447,8 @@ Editor.prototype.initButtons = function (state) {
                 if (!loadSave.onSaveToFile(this.id)) {
                     this.showLoadSaver();
                 }
+            } else {
+                this.eventHub.emit("displaySharingPopover");
             }
         }
     }, this));
@@ -351,13 +457,20 @@ Editor.prototype.initButtons = function (state) {
     this.cppInsightsButton.on('mousedown', _.bind(function () {
         this.updateOpenInCppInsights();
     }, this));
+
+    this.quickBenchButton = this.domRoot.find('.open-in-quickbench');
+    this.quickBenchButton.on('mousedown', _.bind(function () {
+        this.updateOpenInQuickBench();
+    }, this));
 };
 
 Editor.prototype.updateButtons = function () {
     if (this.currentLanguage.id === 'c++') {
         this.cppInsightsButton.show();
+        this.quickBenchButton.show();
     } else {
         this.cppInsightsButton.hide();
+        this.quickBenchButton.hide();
     }
 };
 
@@ -367,6 +480,13 @@ Editor.prototype.b64UTFEncode = function (str) {
     }));
 };
 
+Editor.prototype.asciiEncodeJsonText = function (json) {
+    return json.replace(/[\u007F-\uFFFF]/g, function (chr) {
+        // json unicode escapes must always be 4 characters long, so pad with leading zeros
+        return "\\u" + ("0000" + chr.charCodeAt(0).toString(16)).substr(-4);
+    });
+};
+
 Editor.prototype.updateOpenInCppInsights = function () {
     var cppStd = 'cpp2a'; // if a compiler is linked, maybe we can find this out?
     var link = 'https://cppinsights.io/lnk?code=' + this.b64UTFEncode(this.getSource()) + '&std=' + cppStd + '&rev=1.0';
@@ -374,25 +494,27 @@ Editor.prototype.updateOpenInCppInsights = function () {
     this.domRoot.find(".open-in-cppinsights").attr("href", link);
 };
 
+Editor.prototype.updateOpenInQuickBench = function () {
+    var quickBenchState = {
+        text: this.getSource()
+    };
+
+    var link = 'http://quick-bench.com/#' + btoa(this.asciiEncodeJsonText(JSON.stringify(quickBenchState)));
+    this.domRoot.find(".open-in-quickbench").attr("href", link);
+};
+
 Editor.prototype.changeLanguage = function (newLang) {
     this.selectize.setValue(newLang);
 };
 
-Editor.prototype.clearCompilerLinkedLines = function () {
-    _.each(this.asmByCompiler, _.bind(function (asms, compilerId) {
-        this.eventHub.emit('compilerSetDecorations', compilerId, -1, false);
-    }, this));
+Editor.prototype.clearLinkedLine = function () {
+    this.decorations.linkedCode = [];
+    this.updateDecorations();
 };
 
-Editor.prototype.tryCompilerLinkLine = function (thisLineNumber, reveal) {
+Editor.prototype.tryPanesLinkLine = function (thisLineNumber, reveal) {
     _.each(this.asmByCompiler, _.bind(function (asms, compilerId) {
-        var targetLines = [];
-        _.each(asms, function (asmLine, i) {
-            if (asmLine.source && asmLine.source.file === null && asmLine.source.line === thisLineNumber) {
-                targetLines.push(i + 1);
-            }
-        });
-        this.eventHub.emit('compilerSetDecorations', compilerId, targetLines, reveal);
+        this.eventHub.emit('panesLinkLine', compilerId, thisLineNumber, reveal);
     }, this));
 };
 
@@ -457,13 +579,13 @@ Editor.prototype.initEditorActions = function () {
 
     this.editor.addAction({
         id: 'viewasm',
-        label: 'Scroll to assembly',
+        label: 'Reveal linked code',
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.F10],
         keybindingContext: null,
         contextMenuGroupId: 'navigation',
         contextMenuOrder: 1.5,
         run: _.bind(function (ed) {
-            this.tryCompilerLinkLine(ed.getPosition().lineNumber, true);
+            this.tryPanesLinkLine(ed.getPosition().lineNumber, true);
         }, this)
     });
 };
@@ -494,6 +616,15 @@ Editor.prototype.updateSource = function (newSource) {
     // Apply de edit. Note that we lose cursor position, but I've not found a better alternative yet
     this.editor.getModel().pushEditOperations(viewState.cursorState, [operation], nullFn);
     this.numberUsedLines();
+
+    if (!this.awaitingInitialResults) {
+        if (this.selection) {
+            this.editor.setSelection(this.selection);
+            this.editor.revealLinesInCenter(this.selection.startLineNumber,
+                this.selection.endLineNumber);
+        }
+        this.awaitingInitialResults = true;
+    }
 };
 
 Editor.prototype.formatCurrentText = function () {
@@ -547,7 +678,7 @@ Editor.prototype.formatCurrentText = function () {
 
 Editor.prototype.resize = function () {
     var topBarHeight = this.updateAndCalcTopBarHeight();
-    //var topBarHeight = this.topBar.outerHeight(true) || 0;
+
     this.editor.layout({
         width: this.domRoot.width(),
         height: this.domRoot.height() - topBarHeight
@@ -562,20 +693,26 @@ Editor.prototype.resize = function () {
 
 Editor.prototype.updateAndCalcTopBarHeight = function () {
     var width = this.domRoot.width();
-    if (width === this.cachedTopBarHeightAtWidth) {
+    if (width === this.cachedTopBarHeightAtWidth && !this.topBar.hasClass("d-none")) {
         return this.cachedTopBarHeight;
     }
-    // If we save vertical space by hiding stuff that's OK to hide
-    // when thin, then hide that stuff.
-    this.hideable.show();
-    var topBarHeightMax = this.topBar.outerHeight(true);
-    this.hideable.hide();
-    var topBarHeightMin = this.topBar.outerHeight(true);
-    var topBarHeight = topBarHeightMin;
-    if (topBarHeightMin === topBarHeightMax) {
+
+    var topBarHeight = 0;
+    var topBarHeightMax = 0;
+    var topBarHeightMin = 0;
+
+    if (!this.topBar.hasClass("d-none")) {
         this.hideable.show();
-        topBarHeight = topBarHeightMax;
+        topBarHeightMax = this.topBar.outerHeight(true);
+        this.hideable.hide();
+        topBarHeightMin = this.topBar.outerHeight(true);
+        topBarHeight = topBarHeightMin;
+        if (topBarHeightMin === topBarHeightMax) {
+            this.hideable.show();
+            topBarHeight = topBarHeightMax;
+        }
     }
+
     this.cachedTopBarHeight = topBarHeight;
     this.cachedTopBarHeightAtWidth = width;
     return topBarHeight;
@@ -588,13 +725,14 @@ Editor.prototype.onSettingsChange = function (newSettings) {
 
     this.editor.updateOptions({
         autoClosingBrackets: this.settings.autoCloseBrackets,
-        tabSize: this.settings.tabWidth,
+        useVim: this.settings.useVim,
         quickSuggestions: this.settings.showQuickSuggestions,
         contextmenu: this.settings.useCustomContextMenu,
         minimap: {
             enabled: this.settings.showMinimap && !options.embedded
         },
         fontFamily: this.settings.editorsFFont,
+        fontLigatures: this.settings.editorsFLigatures,
         wordWrap: this.settings.wordWrap ? 'bounded' : 'off',
         wordWrapColumn: this.editor.getLayoutInfo().viewportColumn // Ensure the column count is up to date
     });
@@ -606,6 +744,19 @@ Editor.prototype.onSettingsChange = function (newSettings) {
 
     if (before.hoverShowSource && !after.hoverShowSource) {
         this.onEditorSetDecoration(this.id, -1, false);
+    }
+
+    if (after.useVim && !before.useVim) {
+        this.enableVim();
+    } else if (!after.useVim && before.useVim) {
+        this.disableVim();
+    }
+
+    if (this.editor.getModel()) {
+        this.editor.getModel().updateOptions({
+            tabSize: this.settings.tabWidth,
+            insertSpaces: this.settings.useSpaces
+        });
     }
 
     this.numberUsedLines();
@@ -658,6 +809,13 @@ Editor.prototype.onCompilerOpen = function (compilerId, editorId) {
     }
 };
 
+Editor.prototype.onExecutorOpen = function (executorId, editorId) {
+    if (editorId === this.id) {
+        this.maybeEmitChange(true);
+        this.ourExecutors[executorId] = true;
+    }
+};
+
 Editor.prototype.onCompilerClose = function (compilerId) {
     if (this.ourCompilers[compilerId]) {
         monaco.editor.setModelMarkers(this.editor.getModel(), compilerId, []);
@@ -666,6 +824,12 @@ Editor.prototype.onCompilerClose = function (compilerId) {
         delete this.busyCompilers[compilerId];
         delete this.ourCompilers[compilerId];
         this.numberUsedLines();
+    }
+};
+
+Editor.prototype.onExecutorClose = function (id) {
+    if (this.ourExecutors[id]) {
+        delete this.ourExecutors[id];
     }
 };
 
@@ -714,10 +878,43 @@ Editor.prototype.onSelectLine = function (id, lineNum) {
     }
 };
 
+Editor.prototype.onEditorLinkLine = function (editorId, lineNum, columnNum, reveal) {
+    if (Number(editorId) === this.id) {
+        if (reveal && lineNum) this.editor.revealLineInCenter(lineNum);
+        this.decorations.linkedCode = lineNum === -1 || !lineNum ? [] : [{
+            range: new monaco.Range(lineNum, 1, lineNum, 1),
+            options: {
+                isWholeLine: true,
+                linesDecorationsClassName: 'linked-code-decoration-margin',
+                className: 'linked-code-decoration-line'
+            }
+        }];
+
+        if (lineNum > 0 && columnNum !== -1) {
+            this.decorations.linkedCode.push({
+                range: new monaco.Range(lineNum, columnNum, lineNum, columnNum + 1),
+                options: {
+                    isWholeLine: false,
+                    inlineClassName: 'linked-code-decoration-column'
+                }
+            });
+        }
+
+        if (this.fadeTimeoutId !== -1) {
+            clearTimeout(this.fadeTimeoutId);
+        }
+        this.fadeTimeoutId = setTimeout(_.bind(function () {
+            this.clearLinkedLine();
+            this.fadeTimeoutId = -1;
+        }, this), 5000);
+
+        this.updateDecorations();
+    }
+};
+
 Editor.prototype.onEditorSetDecoration = function (id, lineNum, reveal) {
     if (Number(id) === this.id) {
-        if (reveal && lineNum)
-            this.editor.revealLineInCenter(lineNum);
+        if (reveal && lineNum) this.editor.revealLineInCenter(lineNum);
         this.decorations.linkedCode = lineNum === -1 || !lineNum ? [] : [{
             range: new monaco.Range(lineNum, 1, lineNum, 1),
             options: {
@@ -731,7 +928,9 @@ Editor.prototype.onEditorSetDecoration = function (id, lineNum, reveal) {
 };
 
 Editor.prototype.updateDecorations = function () {
-    this.prevDecorations = this.editor.deltaDecorations(this.prevDecorations, _.flatten(_.values(this.decorations)));
+    this.prevDecorations = this.editor.deltaDecorations(
+        this.prevDecorations,
+        _.compact(_.flatten(_.values(this.decorations))));
 };
 
 Editor.prototype.onConformanceViewOpen = function (editorId) {
@@ -768,7 +967,7 @@ Editor.prototype.onLanguageChange = function (newLangId) {
         if (newLangId !== this.currentLanguage.id) {
             var oldLangId = this.currentLanguage.id;
             this.currentLanguage = languages[newLangId];
-            if (!this.waitingForLanguage) {
+            if (!this.waitingForLanguage && !this.settings.keepSourcesOnLangChange) {
                 this.editorSourceByLang[oldLangId] = this.getSource();
                 this.updateEditorCode();
             }
@@ -790,8 +989,12 @@ Editor.prototype.onLanguageChange = function (newLangId) {
     }
 };
 
+Editor.prototype.getPaneName = function () {
+    return this.currentLanguage.name + " source #" + this.id;
+};
+
 Editor.prototype.updateTitle = function () {
-    this.container.setTitle(this.currentLanguage.name + " source #" + this.id);
+    this.container.setTitle(this.getPaneName());
 };
 
 // Called every time we change language, so we get the relevant code

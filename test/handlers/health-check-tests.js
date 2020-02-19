@@ -24,7 +24,8 @@
 
 const chai = require('chai'),
     healthCheck = require('../../lib/handlers/health-check'),
-    express = require('express');
+    express = require('express'),
+    mockfs = require('mock-fs');
 
 chai.use(require("chai-http"));
 chai.should();
@@ -33,12 +34,39 @@ describe('Health checks', () => {
     const app = express();
     app.use('/hc', new healthCheck.HealthCheckHandler().handle);
 
-    it('should respond with OK', () => {
-        return chai.request(app)
-            .get('/hc')
-            .then(res => res.should.have.status(200))
-            .catch(function (err) {
-                throw err;
-            });
+    it('should respond with OK', async () => {
+        const res = await chai.request(app).get('/hc');
+        res.should.have.status(200);
+        res.text.should.be.eql('Everything is awesome');
+    });
+});
+
+describe('Health checks on disk', () => {
+    const app = express();
+    app.use('/hc', new healthCheck.HealthCheckHandler('/fake/.nonexist').handle);
+    app.use('/hc2', new healthCheck.HealthCheckHandler('/fake/.health').handle);
+
+    before(() => {
+        mockfs({
+            '/fake': {
+                '.health': 'Everything is fine'
+            }
+        });
+    });
+
+    after(() => {
+        mockfs.restore();
+    });
+
+    it('should respond with 500 when file not found', async () => {
+        const res = await chai.request(app).get('/hc');
+        res.should.have.status(500);
+    });
+
+
+    it('should respond with OK and file contents when found', async () => {
+        const res = await chai.request(app).get('/hc2');
+        res.should.have.status(200);
+        res.text.should.be.eql('Everything is fine');
     });
 });

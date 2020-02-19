@@ -64,4 +64,49 @@ describe("Normalizing clientstate", () => {
 
         normalizer.normalized.should.deep.equal(resultdata);
     });
+
+    it("Should support executors", () => {
+        const normalizer = new ClientStateNormalizer();
+
+        const data =  JSON.parse(fs.readFileSync("test/state/executor.json"));
+
+        normalizer.fromGoldenLayout(data);
+
+        const resultdata = JSON.parse(fs.readFileSync("test/state/executor.json.normalized"));
+
+        normalizer.normalized.should.deep.equal(resultdata);
+    });
+});
+
+describe("ClientState parsing", () => {
+    it("Should work without executors", () => {
+        const state = new clientstate.State({
+            "sessions": [
+                {"id":1,
+                "language":"c++",
+                "source":"int main() {}",
+                "compilers":[{"id":"g91","options":"-O3 -std=c++2a"}]
+            }]
+        });
+
+        state.sessions[0].compilers.length.should.equal(1);
+        state.sessions[0].executors.length.should.equal(0);
+    });
+
+    it("Should work with executor", () => {
+        const state = new clientstate.State({
+            "sessions": [
+                {"id":1,
+                "language":"c++",
+                "source":"int main() {}",
+                "compilers": [],
+                "executors":[{
+                    "compiler":{"id":"g91","options":"-O3 -std=c++2a"}
+                }]
+            }]
+        });
+
+        state.sessions[0].compilers.length.should.equal(0);
+        state.sessions[0].executors.length.should.equal(1);
+    });
 });

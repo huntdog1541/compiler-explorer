@@ -35,28 +35,31 @@ const languages = {
     c: {id: 'c'}
 };
 
-const compilerProps = new properties.CompilerProps(languages, properties.fakeProps({}));
-
 describe('PPCI', function () {
-    const ce = new CompilationEnvironment(compilerProps);
+    let ce;
     const info = {
         exe: null,
         remote: true,
         lang: languages.c.id
     };
 
+    before(() => {
+        const compilerProps = new properties.CompilerProps(languages, properties.fakeProps({}));
+        ce = new CompilationEnvironment(compilerProps);
+    });
+
     it('Should be ok with most arguments', () => {
         const compiler = new PPCICompiler(info, ce);
         compiler.filterUserOptions(["hello", "-help", "--something"]).should.deep.equal(["hello", "-help", "--something"]);
     });
 
-    it('Should be Not ok with path argument', () => {
+    it('Should be ok with path argument', () => {
         const compiler = new PPCICompiler(info, ce);
-        compiler.filterUserOptions(["hello", "--stuff", "/proc/cpuinfo"]).should.deep.equal(["hello", "--stuff"]);
+        compiler.filterUserOptions(["hello", "--stuff", "/proc/cpuinfo"]).should.deep.equal(["hello", "--stuff", "/proc/cpuinfo"]);
     });
 
     it('Should be Not ok with report arguments', () => {
         const compiler = new PPCICompiler(info, ce);
-        compiler.filterUserOptions(["hello", "--report", "--text-report"]).should.deep.equal(["hello"]);
+        compiler.filterUserOptions(["hello", "--report", "--text-report", "--html-report"]).should.deep.equal(["hello"]);
     });
 });

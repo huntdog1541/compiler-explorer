@@ -89,7 +89,8 @@ Conformance.prototype.onLibsChanged = function () {
 };
 
 Conformance.prototype.initLibraries = function (state) {
-    this.libsWidget = new Libraries.Widget(this.langId, this.libsButton, state, _.bind(this.onLibsChanged, this));
+    this.libsWidget = new Libraries.Widget(this.langId, null,
+        this.libsButton, state, _.bind(this.onLibsChanged, this));
 };
 
 Conformance.prototype.initButtons = function () {
@@ -131,26 +132,13 @@ Conformance.prototype.setTitle = function (compilerCount) {
     ));
 };
 
-Conformance.prototype.getGroupsInUse = function () {
-    return _.chain(this.compilerService.getCompilersForLang(this.langId))
-        .map()
-        .uniq(false, function (compiler) {
-            return compiler.group;
-        })
-        .map(function (compiler) {
-            return {value: compiler.group, label: compiler.groupName || compiler.group};
-        })
-        .sortBy('label')
-        .value();
-};
-
 Conformance.prototype.addCompilerSelector = function (config) {
     if (!config) {
         config = {
             // Compiler id which is being used
             compilerId: "",
             // Options which are in use
-            options: ""
+            options: options.compileOptions[this.langId]
         };
     }
 
@@ -175,40 +163,33 @@ Conformance.prototype.addCompilerSelector = function (config) {
 
     var status = newEntry.find('.status-icon');
     var prependOptions = newEntry.find('.prepend-options');
-    var langId = this.langId;
-    var isVisible = function (compiler) {
-        return compiler.lang === langId;
-    };
-
     var popCompilerButton = newEntry.find('.extract-compiler');
 
     var onCompilerChange = _.bind(function (compilerId) {
         popCompilerButton.toggleClass('d-none', !compilerId);
         // Hide the results icon when a new compiler is selected
         this.handleStatusIcon(status, {code: 0});
-        var compiler = this.compilerService.findCompiler(langId, compilerId);
+        var compiler = this.compilerService.findCompiler(this.langId, compilerId);
         if (compiler) this.setCompilationOptionsPopover(prependOptions, compiler.options);
+        this.updateLibraries();
     }, this);
 
-    var compilerPicker = newEntry.find('.compiler-picker')
-        .selectize({
-            sortField: [
-                {field: '$order'},
-                {field: 'name'}
-            ],
-            valueField: 'id',
-            labelField: 'name',
-            searchField: ['name'],
-            optgroupField: 'group',
-            optgroups: this.getGroupsInUse(),
-            options: _.filter(options.compilers, isVisible),
-            items: config.compilerId ? [config.compilerId] : [],
-            dropdownParent: 'body'
-        })
-        .on('change', _.bind(function (e) {
-            onCompilerChange($(e.target).val());
-            this.compileChild(newEntry);
-        }, this));
+    var compilerPicker = newEntry.find('.compiler-picker').selectize({
+        sortField: this.compilerService.getSelectizerOrder(),
+        valueField: 'id',
+        labelField: 'name',
+        searchField: ['name'],
+        optgroupField: 'group',
+        optgroups: this.compilerService.getGroupsInUse(this.langId),
+        lockOptgroupOrder: true,
+        options: _.map(this.getCurrentLangCompilers(), _.identity),
+        items: config.compilerId ? [config.compilerId] : [],
+        dropdownParent: 'body',
+        closeAfterSelect: true
+    }).on('change', _.bind(function (e) {
+        onCompilerChange($(e.target).val());
+        this.compileChild(newEntry);
+    }, this));
     onCompilerChange(config.compilerId);
 
 
@@ -230,12 +211,16 @@ Conformance.prototype.addCompilerSelector = function (config) {
     this.saveState();
 };
 
+Conformance.prototype.getCurrentLangCompilers = function () {
+    return this.compilerService.getCompilersForLang(this.langId);
+};
+
 Conformance.prototype.setCompilationOptionsPopover = function (element, content) {
     element.popover('dispose');
     element.popover({
         content: content || 'No options in use',
         template: '<div class="popover' +
-            (content ? ' compiler-options-popover' : '')  +
+            (content ? ' compiler-options-popover' : '') +
             '" role="tooltip"><div class="arrow"></div>' +
             '<h3 class="popover-header"></h3><div class="popover-body"></div></div>'
     });
@@ -243,6 +228,7 @@ Conformance.prototype.setCompilationOptionsPopover = function (element, content)
 
 Conformance.prototype.removeCompilerSelector = function (element) {
     if (element) element.remove();
+    this.updateLibraries();
     this.handleToolbarUI();
     this.saveState();
 };
@@ -305,16 +291,18 @@ Conformance.prototype.compileChild = function (child) {
             options: {
                 userArguments: child.find(".options").val() || "",
                 filters: {},
-                compilerOptions: {produceAst: false, produceOptInfo: false}
+                compilerOptions: {produceAst: false, produceOptInfo: false},
+                libraries: []
             }
         };
-        var compiler = this.compilerService.findCompiler(this.langId, picker.val());
-        var includeFlag = compiler ? compiler.includeFlag : '-I';
+
         _.each(this.libsWidget.getLibsInUse(), function (item) {
-            _.each(item.path, function (path) {
-                request.options.userArguments += ' ' + includeFlag + path;
+            request.options.libraries.push({
+                id: item.libId,
+                version: item.versionId
             });
         });
+
         // This error function ensures that the user will know we had a problem (As we don't save asm)
         this.compilerService.submit(request)
             .then(_.bind(function (x) {
@@ -427,6 +415,62 @@ Conformance.prototype.updateHideables = function () {
     this.hideable.toggle(this.domRoot.width() > this.addCompilerButton.width());
 };
 
+Conformance.prototype.getOverlappingLibraries = function (compilerIds) {
+    var compilers = _.map(compilerIds, _.bind(function (compilerId) {
+        return this.compilerService.findCompiler(this.langId, compilerId);
+    }, this));
+
+    var libraries = {};
+    var first = true;
+    _.forEach(compilers, function (compiler) {
+        if (compiler) {
+            if (first) {
+                libraries = _.extend({}, compiler.libs);
+                first = false;
+            } else {
+                var libsInCommon = _.intersection(_.keys(libraries),
+                    _.keys(compiler.libs));
+    
+                _.forEach(libraries, function (lib, libkey) {
+                    if (libsInCommon.includes(libkey)) {
+                        var versionsInCommon = _.intersection(_.keys(lib.versions),
+                            _.keys(compiler.libs[libkey].versions));
+
+                        libraries[libkey].versions = _.pick(lib.versions,
+                            function (version, versionkey) {
+                                return versionsInCommon.includes(versionkey);
+                            });
+                    } else {
+                        libraries[libkey] = false;
+                    }
+                });
+    
+                libraries = _.omit(libraries, function (lib) {
+                    return !lib || _.isEmpty(lib.versions);
+                });
+            }
+        }
+    });
+
+    return libraries;
+};
+
+Conformance.prototype.updateLibraries = function () {
+    var compilerIds = _.uniq(
+        _.filter(
+            _.map(this.selectorList.children(), function (child) {
+                return $(child).find('.compiler-picker').val();
+            })
+            , function (compilerId) {
+                return compilerId !== "";
+            })
+    );
+
+    var libraries = this.getOverlappingLibraries(compilerIds);
+
+    this.libsWidget.setNewLangId(this.langId, compilerIds.join("|"), libraries);
+};
+
 Conformance.prototype.onLanguageChange = function (editorId, newLangId) {
     if (editorId === this.editorId && this.langId !== newLangId) {
         var oldLangId = this.langId;
@@ -436,7 +480,7 @@ Conformance.prototype.onLanguageChange = function (editorId, newLangId) {
         this.selectorList.children().remove();
         var langState = this.stateByLang[newLangId];
         this.initFromState(langState);
-        this.libsWidget.setNewLangId(newLangId);
+        this.updateLibraries();
         this.handleToolbarUI();
         this.saveState();
     }

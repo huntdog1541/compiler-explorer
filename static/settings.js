@@ -89,8 +89,9 @@ Textbox.prototype.putUi = function (elem, value) {
     elem.val(value);
 };
 
-
-function setupSettings(root, settings, onChange, langId) {
+// Ignore max statements, there's no limit as to how many settings we need
+// eslint-disable-next-line max-statements
+function setupSettings(root, settings, onChange, subLangId) {
     settings = settings || {};
     // Ensure the default language is not "null" but undefined. Temporary patch for a previous bug :(
     settings.defaultLanguage = settings.defaultLanguage === null ? undefined : settings.defaultLanguage;
@@ -142,8 +143,15 @@ function setupSettings(root, settings, onChange, langId) {
     add(root.find('.enableCommunityAds'), 'enableCommunityAds', true, Checkbox);
     add(root.find('.hoverShowSource'), 'hoverShowSource', true, Checkbox);
     add(root.find('.hoverShowAsmDoc'), 'hoverShowAsmDoc', true, Checkbox);
+
     var themeSelect = root.find('.theme');
-    add(themeSelect, 'theme', themes.default.id, Select,
+
+    var defaultThemeId = themes.default.id;
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        defaultThemeId = themes.dark.id;
+    }
+
+    add(themeSelect, 'theme', defaultThemeId, Select,
         _.map(themes, function (theme) {
             return {label: theme.id, desc: theme.name};
         })
@@ -190,7 +198,7 @@ function setupSettings(root, settings, onChange, langId) {
             return {label: lang.id, desc: lang.name};
         })
     );
-    if (langId) {
+    if (subLangId) {
         defaultLanguageSelector
             .prop('disabled', true)
             .prop('title', 'Default language inherited from subdomain')
@@ -211,7 +219,7 @@ function setupSettings(root, settings, onChange, langId) {
         onSettingsChange(settings);
         onChange(settings);
     }
-
+    add(root.find('.useSpaces'), 'useSpaces', true, Checkbox);
     add(root.find('.tabWidth'), 'tabWidth', 4, Select,
         _.map([2, 4, 8], function (size) {
             return {label: size, desc: size};
@@ -219,6 +227,10 @@ function setupSettings(root, settings, onChange, langId) {
     );
     add(root.find('.enableCtrlS'), 'enableCtrlS', true, Checkbox);
     add(root.find('.editorsFFont'), 'editorsFFont', 'Consolas, "Liberation Mono", Courier, monospace', Textbox);
+    add(root.find('.editorsFLigatures'), 'editorsFLigatures', false, Checkbox);
+    add(root.find('.allowStoreCodeDebug'), 'allowStoreCodeDebug', true, Checkbox);
+    add(root.find('.useVim'), 'useVim', false, Checkbox);
+    add(root.find('.keepSourcesOnLangChange'), 'keepSourcesOnLangChange', false, Checkbox);
 
     setSettings(settings);
     handleThemes();

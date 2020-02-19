@@ -38,12 +38,14 @@ function processAsm(filename, filters) {
     return parser.process(file, filters);
 }
 
-const cases = fs.readdirSync(__dirname + '/cases')
+const filesInCaseDir = fs.readdirSync(__dirname + '/cases')
+    .map(function (x) {
+        return 'cases/' + x;
+    });
+
+const cases = filesInCaseDir
     .filter(function (x) {
         return x.match(/\.asm$/);
-    })
-    .map(function (x) {
-        return __dirname + '/cases/' + x;
     });
 
 function bless(filename, output, filters) {
@@ -58,23 +60,24 @@ function dump(file) {
 }
 
 function testFilter(filename, suffix, filters) {
-    const result = processAsm(filename, filters);
     const expected = filename + suffix;
-    let json = false;
+    const json = filesInCaseDir.includes(expected + '.json');
+
     let file;
-    try {
-        file = fs.readFileSync(expected + '.json', 'utf-8');
-        json = true;
-    } catch (e) {
+
+    if (json) {
+        file = fs.readFileSync(__dirname + '/' + expected + '.json', 'utf-8');
     }
-    if (!file) {
-        try {
-            file = fs.readFileSync(expected, 'utf-8');
-        } catch (e) {
-            return;
-        }
+    else if (filesInCaseDir.includes(expected)) {
+        file = fs.readFileSync(__dirname + '/' + expected, 'utf-8');
     }
-    it(filename, function () {
+    else {
+        return;
+    }
+
+    it(filename, () => {
+        const result = processAsm(__dirname + '/' + filename, filters);
+
         if (json) {
             file = JSON.parse(file);
         } else {
@@ -83,7 +86,7 @@ function testFilter(filename, suffix, filters) {
         if (json) {
             result.should.deep.equal(file);
         } else {
-            result.map(function (x) {
+            result.asm.map(function (x) {
                 return x.text;
             }).should.deep.equal(file);
         }
@@ -109,9 +112,10 @@ function testFilter(filename, suffix, filters) {
 // bless("cases/bug-995.asm", "cases/bug-995.directives.labels.comments.json", {directives: true, labels: true, commentOnly: true});
 // bless("cases/arm-jump-table.asm", "cases/arm-jump-table.asm.directives.labels.comments.json", {directives: true, labels: true, commentOnly: true});
 // bless("cases/bug-1179.asm", "cases/bug-1179.asm.directives.labels.comments.json", {directives: true, labels: true, commentOnly: true});
+// bless("cases/6502-square.asm", "cases/6502-square.asm.directives.labels.comments.json", {directives: true, labels: true, commentOnly: true});
 // describe('A test', function() {
 //     it('should work', function(){
-//         console.log(processAsm(__dirname + '/cases/bug-1179.asm', {directives: true, labels: true, commentOnly: true}));
+//         console.log(processAsm(__dirname + '/cases/6502-square.asm', {directives: true, labels: true, commentOnly: true}));
 //     });
 // });
 

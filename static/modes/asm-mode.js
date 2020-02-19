@@ -23,6 +23,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 "use strict";
+var monaco = require('monaco-editor');
 
 function definition() {
     return {
@@ -41,13 +42,13 @@ function definition() {
                 // Error document
                 [/^<.*>$/, {token: 'annotation'}],
                 // Label definition
-                [/^[.a-zA-Z0-9_$?@].*:/, {token: 'type.identifier', next: '@rest'}],
+                [/^[.a-zA-Z0-9_$?@].*:/, {token: 'type.identifier'}],
                 // Label definition (ARM style)
-                [/^\s*[|][^|]*[|]/, {token: 'type.identifier', next: '@rest'}],
+                [/^\s*[|][^|]*[|]/, {token: 'type.identifier'}],
                 // Label definition (CL style)
-                [/^\s*[.a-zA-Z0-9_$|]*\s*(PROC|ENDP|DB|DD)/, {token: 'type.identifier', next: '@rest'}],
+                [/^\s*[.a-zA-Z0-9_$|]*\s*(PROC|ENDP|DB|DD)/, {token: 'type.identifier'}],
                 // Constant definition
-                [/^[.a-zA-Z0-9_$?@][^=]*=/, {token: 'type.identifier', next: '@rest'}],
+                [/^[.a-zA-Z0-9_$?@][^=]*=/, {token: 'type.identifier'}],
                 // opcode
                 [/[.a-zA-Z_][.a-zA-Z_0-9]*/, {token: 'keyword', next: '@rest'}],
                 // braces and parentheses at the start of the line (e.g. nvcc output)

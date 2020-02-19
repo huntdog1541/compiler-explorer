@@ -25,13 +25,22 @@
 const should = require('chai').should();
 const properties = require('../lib/properties');
 
-
-properties.initialize('test/example-config/', ['test', 'overridden-base', 'overridden-tip']);
-
-const casesProps = properties.propsFor("cases");
-const overridingProps = properties.propsFor("overwrite");
+const languages = {
+    a: {id: 'a'}
+};
 
 describe('Properties', () => {
+    let casesProps, overridingProps, compilerProps;
+
+    before(() => {
+        properties.initialize('test/example-config/', ['test', 'overridden-base', 'overridden-tip']);
+        casesProps = properties.propsFor("cases");
+        overridingProps = properties.propsFor("overwrite");
+        compilerProps = new properties.CompilerProps(languages, properties.fakeProps({
+            foo: '1'
+        }));
+    });
+
     it('Has working propsFor', () => {
         should.equal(properties.get("cases", "exampleProperty"), casesProps("exampleProperty"));
     });
@@ -112,12 +121,6 @@ describe('Properties', () => {
     it('Should fall back from overridden', () => {
         should.equal(overridingProps("localProperty"), 11235813);
     });
-    const languages = {
-        a: {id: 'a'}
-    };
-    const compilerProps = new properties.CompilerProps(languages, properties.fakeProps({
-        foo: '1'
-    }));
     it('should have an identity function if none provided', () => {
         should.equal(compilerProps.get('a', 'foo', '0', undefined), '1');
         compilerProps.get(languages, 'foo', '0', undefined).should.deep.equal({a: '1'});
@@ -143,5 +146,17 @@ describe('Properties', () => {
         should.equal(compilerProps.get('a', 'bar', true), false);
         compilerProps.get(languages, 'bar', true, undefined).should.deep.equal({a: false});
         compilerProps.propsByLangId[languages.a.id] = undefined;
+    });
+});
+
+describe('Properties blob parsing', () => {
+    it('Normal properties', () => {
+        const props = properties.parseProperties(
+            "hello = test \n" +
+            "etc=123\n" +
+            "mybool=false\n");
+        props.hello.should.equal("test");
+        props.etc.should.equal(123);
+        props.mybool.should.equal(false);
     });
 });

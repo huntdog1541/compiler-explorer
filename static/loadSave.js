@@ -30,6 +30,7 @@ var Alert = require('./alert');
 var local = require('./local');
 var Promise = require('es6-promise').Promise;
 var ga = require('./analytics');
+var history = require('./history');
 
 function getLocalFiles() {
     return JSON.parse(local.get('files', "{}"));
@@ -42,24 +43,25 @@ function setLocalFile(name, file) {
 }
 
 function LoadSave() {
-    this.modal = $('#load-save');
+    this.modal = null;
     this.alertSystem = new Alert();
     this.alertSystem.prefixMessage = "Load-Saver: ";
     this.onLoad = _.identity;
     this.editorText = '';
     this.extension = '.txt';
-    this.modal.find('.local-file').change(_.bind(this.onLocalFile, this));
-
-    this.modal.find('.save-button').click(_.bind(this.onSaveToBrowserStorage, this));
-    this.modal.find('.save-file').click(_.bind(this.onSaveToFile, this));
-
     this.base = window.httpRoot;
-    if (!this.base.endsWith('/')) {
-        this.base += '/';
-    }
-
     this.fetchBuiltins();
 }
+
+LoadSave.prototype.initializeIfNeeded = function () {
+    if ((this.modal === null) || (this.modal.length === 0)) {
+        this.modal = $("#load-save");
+
+        this.modal.find('.local-file').change(_.bind(this.onLocalFile, this));
+        this.modal.find('.save-button').click(_.bind(this.onSaveToBrowserStorage, this));
+        this.modal.find('.save-file').click(_.bind(this.onSaveToFile, this));
+    }
+};
 
 LoadSave.prototype.fetchBuiltins = function () {
     return new Promise(_.bind(function (resolve) {
@@ -102,6 +104,21 @@ LoadSave.prototype.populateLocalStorage = function () {
         }, this)));
 };
 
+LoadSave.prototype.populateLocalHistory = function () {
+    this.populate(
+        this.modal.find('.local-history'),
+        _.map(history.sources(this.currentLanguage.id), _.bind(function (data) {
+            var dt = new Date(data.dt);
+            return {
+                name: dt.toString().replace(/\s\(.*\)/, ''),
+                load: _.bind(function () {
+                    this.onLoad(data.source);
+                    this.modal.modal('hide');
+                }, this)
+            };
+        }, this)));
+};
+
 LoadSave.prototype.populate = function (root, list) {
     root.find('li:not(.template)').remove();
     var template = root.find('.template');
@@ -128,9 +145,11 @@ LoadSave.prototype.onLocalFile = function (event) {
 };
 
 LoadSave.prototype.run = function (onLoad, editorText, currentLanguage) {
+    this.initializeIfNeeded();
     this.populateLocalStorage();
-    this.onLoad = onLoad;
     this.setMinimalOptions(editorText, currentLanguage);
+    this.populateLocalHistory();
+    this.onLoad = onLoad;
     this.modal.find('.local-file').attr('accept', _.map(currentLanguage.extensions, function (extension) {
         return extension + ', ';
     }, this));

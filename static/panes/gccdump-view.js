@@ -25,7 +25,7 @@
 'use strict';
 
 var FontScale = require('../fontscale');
-var monaco = require('../monaco');
+var monaco = require('monaco-editor');
 var Toggles = require('../toggles');
 require('../modes/gccdump-rtl-gimple-mode');
 var _ = require('underscore');
@@ -39,8 +39,6 @@ function GccDump(hub, container, state) {
     this.eventHub = hub.createEventHub();
     this.domRoot = container.getElement();
     this.domRoot.html($('#gccdump').html());
-
-    this._currentDecorations = [];
 
     this.gccDumpEditor = monaco.editor.create(this.domRoot.find('.monaco-placeholder')[0], {
         value: '',
@@ -76,6 +74,9 @@ function GccDump(hub, container, state) {
     this.state._compilerid = state._compilerid;
     this.state._editorid = state._editorid;
     this._compilerName = state._compilerName;
+
+    this.awaitingInitialResults = false;
+    this.selection = state.selection;
 
     this.initCallbacks();
 
@@ -129,6 +130,12 @@ GccDump.prototype.initCallbacks = function () {
 
     this.container.on('resize', this.resize, this);
     this.container.on('shown', this.resize, this);
+
+    this.cursorSelectionThrottledFunction =
+        _.throttle(_.bind(this.onDidChangeCursorSelection, this), 500);
+    this.gccDumpEditor.onDidChangeCursorSelection(_.bind(function (e) {
+        this.cursorSelectionThrottledFunction(e);
+    }, this));
 };
 
 // Disable view's menu when invalid compiler has been
@@ -242,6 +249,15 @@ GccDump.prototype.setTitle = function () {
 
 GccDump.prototype.showGccDumpResults = function (results) {
     this.gccDumpEditor.setValue(results);
+
+    if (!this.awaitingInitialResults) {
+        if (this.selection) {
+            this.gccDumpEditor.setSelection(this.selection);
+            this.gccDumpEditor.revealLinesInCenter(this.selection.startLineNumber,
+                this.selection.endLineNumber);
+        }
+        this.awaitingInitialResults = true;
+    }
 };
 
 GccDump.prototype.onCompiler = function (id, compiler, options, editorid) {
@@ -288,7 +304,8 @@ GccDump.prototype.currentState = function () {
         _editorid: this.state._editorid,
         selectedPass: this.state.selectedPass,
         treeDump: filters.treeDump,
-        rtlDump: filters.rtlDump
+        rtlDump: filters.rtlDump,
+        selection: this.selection
     };
 };
 
@@ -298,8 +315,16 @@ GccDump.prototype.onSettingsChange = function (newSettings) {
         minimap: {
             enabled: newSettings.showMinimap
         },
-        fontFamily: newSettings.editorsFFont
+        fontFamily: newSettings.editorsFFont,
+        fontLigatures: newSettings.editorsFLigatures
     });
+};
+
+GccDump.prototype.onDidChangeCursorSelection = function (e) {
+    if (this.awaitingInitialResults) {
+        this.selection = e.selection;
+        this.saveState();
+    }
 };
 
 GccDump.prototype.close = function () {
